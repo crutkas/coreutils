@@ -61,3 +61,19 @@ fn test_normal_compare_env() {
 fn test_succeeds_on_all_platforms() {
     new_ucmd!().succeeds().no_stderr();
 }
+
+// Coverage for #4614: on Windows `test_normal_compare_env` is skipped under CI,
+// so nothing verifies whoami's *value* there (only that it succeeds). Assert
+// the output equals the account name Windows reports via %USERNAME% — which is
+// what the GetUserNameW path in platform/windows.rs returns — so that path is
+// checked for correctness in CI too. (The codecov "0% on Windows" report is the
+// separate issue #6686: coverage is not collected on Windows.)
+#[test]
+#[cfg(windows)]
+fn test_windows_matches_username_env() {
+    if let Ok(username) = std::env::var("USERNAME")
+        && !username.is_empty()
+    {
+        new_ucmd!().succeeds().stdout_is(format!("{username}\n"));
+    }
+}

@@ -513,10 +513,29 @@ fn link(src: &Path, dst: &Path, settings: &Settings) -> LnResult<()> {
 
 #[cfg(windows)]
 pub fn symlink<P1: AsRef<Path>, P2: AsRef<Path>>(src: P1, dst: P2) -> io::Result<()> {
-    if src.as_ref().is_dir() {
-        symlink_dir(src, dst)
+    use std::os::windows::ffi::{OsStrExt, OsStringExt};
+
+    // Windows symlink targets must use `\` as the path separator; a target that
+    // still contains `/` produces a link Windows cannot resolve (GH #6439).
+    // Rewrite `/` to `\` in the target, preserving any non-UTF-8 content.
+    let converted: Vec<u16> = src
+        .as_ref()
+        .as_os_str()
+        .encode_wide()
+        .map(|unit| {
+            if unit == u16::from(b'/') {
+                u16::from(b'\\')
+            } else {
+                unit
+            }
+        })
+        .collect();
+    let src = PathBuf::from(OsString::from_wide(&converted));
+
+    if src.is_dir() {
+        symlink_dir(&src, dst)
     } else {
-        symlink_file(src, dst)
+        symlink_file(&src, dst)
     }
 }
 

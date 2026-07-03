@@ -81,6 +81,12 @@ enum LsError {
         },
         _ => if 9 == .1.raw_os_error().unwrap_or(1) {
             translate!("ls-error-cannot-open-directory-bad-descriptor", "path" => .0.quote())
+        } else if cfg!(windows) && .1.raw_os_error() == Some(123) {
+            // Windows ERROR_INVALID_NAME (123): the path contains characters that
+            // are invalid on Windows, e.g. an unexpanded glob such as `a.txtt*`.
+            // GNU/Linux, where `*` is a valid filename byte, reports such a name
+            // as nonexistent, so map it to the same message. (GH #6710)
+            translate!("ls-error-cannot-access-no-such-file", "path" => .0.quote())
         } else {
             translate!("ls-error-unknown-io-error", "path" => .0.quote(), "error" => format!("{:?}", .1))
         },

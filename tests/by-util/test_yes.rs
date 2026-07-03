@@ -111,3 +111,20 @@ fn test_non_utf8() {
         &b"\xbf\xff\xee bar\n".repeat(5000),
     );
 }
+
+// Regression test for #12236: on Windows, `yes` must accept arguments that are
+// not valid Unicode (e.g. an unpaired UTF-16 surrogate) and stream them as
+// bytes, just like the Unix path covered by `test_non_utf8` above. Before the
+// fix, `yes` rejected such arguments with exit code 1 on Windows.
+#[test]
+#[cfg(windows)]
+fn test_non_unicode_windows() {
+    use std::ffi::OsString;
+    use std::os::windows::ffi::OsStringExt;
+
+    // 0xD800 is an unpaired high surrogate: a valid UTF-16 unit but not valid
+    // Unicode. Its WTF-8 encoding (what `OsStr::as_encoded_bytes` yields) is
+    // ED A0 80, which is what `yes` should stream.
+    let arg = OsString::from_wide(&[0xD800]);
+    run(&[arg], &b"\xed\xa0\x80\n".repeat(100));
+}

@@ -23,10 +23,6 @@ pub fn uumain(args: impl uucore::Args) -> UResult<()> {
 
     #[allow(clippy::unwrap_used, reason = "clap provides 'y' by default")]
     let mut buffer = args_into_buffer(matches.get_many::<OsString>("STRING").unwrap());
-    // On the platform OsStr is not &[u8], reject invalid utf8
-    // todo: accept invalid utf8 on safe output type
-    #[cfg(not(any(unix, target_os = "wasi")))]
-    std::str::from_utf8(&buffer).map_err(|e| USimpleError::new(1, format!("{e}")))?;
 
     repeat_content_to_capacity(&mut buffer);
     match exec(&buffer) {

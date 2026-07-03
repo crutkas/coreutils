@@ -1675,3 +1675,19 @@ fn test_dash_hint_is_shell_escaped() {
         .fails_with_code(1)
         .stderr_contains("./'-a'$'\\t''b'\\''c'' to remove the file '-a'$'\\t''b'\\''c'.");
 }
+
+// Regression test for #5823: on Windows the read-only file attribute makes
+// deletion fail with PermissionDenied, so `rm -f` must clear it and remove the
+// file. On Unix the read-only bit never blocks unlink, so this behavior is
+// Windows-specific.
+#[test]
+#[cfg(windows)]
+fn test_rm_force_read_only_file() {
+    let (at, mut ucmd) = at_and_ucmd!();
+    let file = "read_only_file";
+    at.touch(file);
+    at.set_readonly(file);
+
+    ucmd.arg("-f").arg(file).succeeds().no_stderr();
+    assert!(!at.file_exists(file));
+}

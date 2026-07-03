@@ -124,7 +124,16 @@ impl<'a> Context<'a> {
         let target_is_file = target.is_file();
         let root_parent =
             if target.exists() && !root.as_os_str().as_encoded_bytes().ends_with(b"/.") {
-                root_path.parent().map(ToOwned::to_owned)
+                // Normally the parent of the source directory. When the source is a
+                // filesystem root (e.g. a Windows drive root `W:\`, or `/`), `parent()`
+                // is `None`; using `None` would leave the descendant path absolute and
+                // make it replace the target when joined, so fall back to the root
+                // itself and strip it, yielding a relative descendant. (GH #5166)
+                Some(
+                    root_path
+                        .parent()
+                        .map_or_else(|| root_path.clone(), Path::to_path_buf),
+                )
             } else if root == Path::new(".") && target.is_dir() {
                 // Special case: when copying current directory (.) to an existing directory,
                 // we don't want to use the parent path as root_parent because we want to

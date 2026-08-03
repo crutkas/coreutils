@@ -511,35 +511,94 @@ fn link(src: &Path, dst: &Path, settings: &Settings) -> LnResult<()> {
     Ok(())
 }
 
+/// Rewrite `/` to `\` in a symlink target.
+///
+/// Windows stores a symlink's target verbatim and resolves it later in the NT
+/// namespace, where `/` is an ordinary filename character rather than a path
+/// separator. The Win32 layer's `/` to `\` normalization applies to paths handed
+/// *into* APIs, not to an already-stored reparse target, so a link created with
+/// `/` in its target is created successfully but cannot be resolved: opening it
+/// fails with `ERROR_INVALID_NAME`. (GH #6439)
+///
+/// Operates on the WTF-8 bytes rather than round-tripping through UTF-16, and
+/// borrows when there is nothing to rewrite.
+#[cfg(windows)]
+fn to_windows_separators(src: &Path) -> Cow<'_, Path> {
+    let bytes = src.as_os_str().as_encoded_bytes();
+    let Some(first) = bytes.iter().position(|&byte| byte == b'/') else {
+        return Cow::Borrowed(src);
+    };
+
+    let mut bytes = bytes.to_vec();
+    for byte in &mut bytes[first..] {
+        if *byte == b'/' {
+            *byte = b'\\';
+        }
+    }
+
+    // SAFETY: `bytes` came from `as_encoded_bytes`, and the only modification is
+    // replacing the ASCII byte `/` with the ASCII byte `\`. WTF-8 encodes every
+    // ASCII character as a standalone single byte that can never appear inside a
+    // multi-byte sequence, so swapping one for another leaves the encoding valid.
+    let target = unsafe { OsString::from_encoded_bytes_unchecked(bytes) };
+    Cow::Owned(PathBuf::from(target))
+}
+
 #[cfg(windows)]
 pub fn symlink<P1: AsRef<Path>, P2: AsRef<Path>>(src: P1, dst: P2) -> io::Result<()> {
-    use std::os::windows::ffi::{OsStrExt, OsStringExt};
+    let target = to_windows_separators(src.as_ref());
 
-    // Windows symlink targets must use `\` as the path separator; a target that
-    // still contains `/` produces a link Windows cannot resolve (GH #6439).
-    // Rewrite `/` to `\` in the target, preserving any non-UTF-8 content.
-    let converted: Vec<u16> = src
-        .as_ref()
-        .as_os_str()
-        .encode_wide()
-        .map(|unit| {
-            if unit == u16::from(b'/') {
-                u16::from(b'\\')
-            } else {
-                unit
-            }
-        })
-        .collect();
-    let src = PathBuf::from(OsString::from_wide(&converted));
-
-    if src.is_dir() {
-        symlink_dir(&src, dst)
+    if target.is_dir() {
+        symlink_dir(&*target, dst)
     } else {
-        symlink_file(&src, dst)
+        symlink_file(&*target, dst)
     }
 }
 
 #[cfg(target_os = "wasi")]
 pub fn symlink<P1: AsRef<Path>, P2: AsRef<Path>>(src: P1, dst: P2) -> io::Result<()> {
     rustix::fs::symlink(src.as_ref(), dst.as_ref()).map_err(io::Error::from)
+}
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::to_windows_separators;
+    use std::borrow::Cow;
+    use std::ffi::OsString;
+    use std::os::windows::ffi::OsStringExt;
+    use std::path::Path;
+
+    #[test]
+    fn test_borrows_when_nothing_to_rewrite() {
+        let path = Path::new(r"dir\file");
+        assert!(matches!(to_windows_separators(path), Cow::Borrowed(_)));
+    }
+
+    #[test]
+    fn test_rewrites_forward_slashes() {
+        assert_eq!(
+            &*to_windows_separators(Path::new("dir/sub/file")),
+            Path::new(r"dir\sub\file")
+        );
+        // Mixed separators, and a target that is already partly converted.
+        assert_eq!(
+            &*to_windows_separators(Path::new(r"a\b/c/d")),
+            Path::new(r"a\b\c\d")
+        );
+    }
+
+    #[test]
+    fn test_preserves_non_unicode() {
+        // 0xD800 is an unpaired high surrogate: valid UTF-16 but not valid
+        // Unicode, so it exercises the WTF-8 bytes the conversion operates on. It
+        // must survive untouched while the separators around it are rewritten.
+        let wide = |units: &[u16]| OsString::from_wide(units);
+        let src = wide(&[b'a'.into(), b'/'.into(), 0xD800, b'/'.into(), b'b'.into()]);
+        let expected = wide(&[b'a'.into(), b'\\'.into(), 0xD800, b'\\'.into(), b'b'.into()]);
+
+        assert_eq!(
+            &*to_windows_separators(Path::new(&src)),
+            Path::new(&expected)
+        );
+    }
 }

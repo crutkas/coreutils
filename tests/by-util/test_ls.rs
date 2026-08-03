@@ -7517,3 +7517,18 @@ fn test_ls_al_no_capabilities_insufficient_on_wasi() {
         out.stdout_str()
     );
 }
+
+// Regression test for #6710: on Windows an unmatched/invalid glob argument such
+// as `a.txtt*` reaches `ls` literally and Windows returns ERROR_INVALID_NAME
+// (123) for it. `ls` must report "No such file or directory" (matching GNU on
+// Linux, where `*` is a valid filename byte and stat returns NotFound) rather
+// than the opaque "unknown io error".
+#[test]
+#[cfg(windows)]
+fn test_ls_invalid_filename_reports_no_such_file() {
+    new_ucmd!()
+        .arg("a.txtt*")
+        .fails()
+        .stderr_contains("cannot access")
+        .stderr_contains("No such file or directory");
+}

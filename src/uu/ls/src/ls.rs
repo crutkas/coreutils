@@ -60,6 +60,14 @@ use config::{Dereference, Files, Sort};
 use dired::DiredOutput;
 use display::{display_items, display_size, should_display, show_dir_name};
 
+/// Windows `ERROR_INVALID_NAME`: the path contains characters that cannot appear
+/// in a filename. Deliberately narrower than [`ErrorKind::InvalidFilename`],
+/// which also covers `ERROR_BAD_PATHNAME` and `ERROR_FILENAME_EXCED_RANGE` — the
+/// latter being the Windows equivalent of `ENAMETOOLONG`, which GNU reports as
+/// "File name too long" rather than as a missing file.
+#[cfg(windows)]
+const ERROR_INVALID_NAME: i32 = 123;
+
 #[derive(Error, Debug)]
 enum LsError {
     #[error("{}", translate!("ls-error-invalid-line-width", "width" => format!("'{_0}'")))]
@@ -71,6 +79,13 @@ enum LsError {
     #[error("{}", match .1.kind() {
 		ErrorKind::NotADirectory => translate!("ls-error-not-directory", "path" => .0.quote()),
         ErrorKind::NotFound => translate!("ls-error-cannot-access-no-such-file", "path" => .0.quote()),
+        // An unexpanded glob such as `a.txtt*` reaches ls literally on Windows and
+        // stat fails with ERROR_INVALID_NAME, because `*` cannot appear in a Windows
+        // filename. GNU on Linux, where `*` is an ordinary filename byte, reports the
+        // same argument as nonexistent, so use that message here too. (GH #6710)
+        #[cfg(windows)]
+        ErrorKind::InvalidFilename if .1.raw_os_error() == Some(ERROR_INVALID_NAME) =>
+            translate!("ls-error-cannot-access-no-such-file", "path" => .0.quote()),
         ErrorKind::PermissionDenied => match .1.raw_os_error().unwrap_or(1) {
             1 => translate!("ls-error-cannot-access-operation-not-permitted", "path" => .0.quote()),
             _ => if .0.is_dir() {

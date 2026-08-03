@@ -39,6 +39,12 @@ fn get_userlogin() -> Option<String> {
     if unsafe { GetUserNameW(buffer.as_mut_ptr(), &raw mut len) } == 0 {
         return None;
     }
+    // `len` counts the terminating NUL, so anything at or below 1 means there is
+    // no name to report. Guarding here also keeps the subtraction below from
+    // underflowing should the API ever report a length of 0.
+    if len <= 1 || len as usize > buffer.len() {
+        return None;
+    }
     Some(
         OsString::from_wide(&buffer[..len as usize - 1])
             .to_string_lossy()

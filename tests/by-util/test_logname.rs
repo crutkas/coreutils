@@ -54,3 +54,22 @@ fn test_output_format() {
         result.stdout_str()
     );
 }
+
+// Regression test for #11056: on Windows, `logname` must print the current
+// user's account name (via GetUserNameW) instead of failing with
+// "logname: no login name" (exit code 1) as it did before Windows support
+// was added.
+#[test]
+#[cfg(windows)]
+fn test_windows_login_name() {
+    let result = new_ucmd!().succeeds();
+    let out = result.stdout_str().trim_end();
+    assert!(!out.is_empty(), "logname printed an empty name");
+    // GetUserNameW returns the same account name as the USERNAME environment
+    // variable of the test process, so use it as the expected value when set.
+    if let Ok(expected) = env::var("USERNAME") {
+        if !expected.is_empty() {
+            assert_eq!(out, expected);
+        }
+    }
+}

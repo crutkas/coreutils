@@ -20,10 +20,19 @@ test = false
 doctest = false
 
 [dependencies]
-libc = { workspace = true }
 clap = { workspace = true }
 uucore = { workspace = true }
 fluent = { workspace = true }
+
+[target.'cfg(unix)'.dependencies]
+libc = { workspace = true }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { workspace = true, features = [
+  "Win32_NetworkManagement_NetManagement",
+  "Win32_System_WindowsProgramming",
+  "Win32_Foundation",
+] }
 
 [[bin]]
 name = "logname"

@@ -890,18 +890,15 @@ fn remove_file(path: &Path, options: &Options, progress_bar: Option<&ProgressBar
 // semantics of this call, which do not apply on Windows.
 #[allow(clippy::permissions_set_readonly_false)]
 fn clear_readonly(path: &Path) -> bool {
-    match fs::metadata(path) {
-        Ok(md) => {
-            let mut perms = md.permissions();
-            if perms.readonly() {
-                perms.set_readonly(false);
-                fs::set_permissions(path, perms).is_ok()
-            } else {
-                true
-            }
-        }
-        Err(_) => false,
+    let Ok(metadata) = fs::metadata(path) else {
+        return false;
+    };
+    let mut perms = metadata.permissions();
+    if !perms.readonly() {
+        return true;
     }
+    perms.set_readonly(false);
+    fs::set_permissions(path, perms).is_ok()
 }
 
 fn prompt_dir(path: &Path, options: &Options) -> bool {

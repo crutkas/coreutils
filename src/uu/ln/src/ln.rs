@@ -511,17 +511,6 @@ fn link(src: &Path, dst: &Path, settings: &Settings) -> LnResult<()> {
     Ok(())
 }
 
-/// Rewrite `/` to `\` in a symlink target.
-///
-/// Windows stores a symlink's target verbatim and resolves it later in the NT
-/// namespace, where `/` is an ordinary filename character rather than a path
-/// separator. The Win32 layer's `/` to `\` normalization applies to paths handed
-/// *into* APIs, not to an already-stored reparse target, so a link created with
-/// `/` in its target is created successfully but cannot be resolved: opening it
-/// fails with `ERROR_INVALID_NAME`. (GH #6439)
-///
-/// Operates on the WTF-8 bytes rather than round-tripping through UTF-16, and
-/// borrows when there is nothing to rewrite.
 #[cfg(windows)]
 fn to_windows_separators(src: &Path) -> Cow<'_, Path> {
     let bytes = src.as_os_str().as_encoded_bytes();

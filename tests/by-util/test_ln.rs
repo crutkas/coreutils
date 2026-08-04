@@ -56,6 +56,27 @@ fn test_symlink_existing_directory() {
     assert_eq!(at.resolve_link(link), dir);
 }
 
+// Regression test for #6439: on Windows a symlink target passed with `/` must
+// be stored with `\`, otherwise Windows cannot resolve the resulting link.
+// (`/` is a valid separator in inputs but not in a stored symlink target.)
+#[test]
+#[cfg(windows)]
+fn test_symlink_forward_slash_target_converted_to_backslash() {
+    let (at, mut ucmd) = at_and_ucmd!();
+    at.mkdir("dir");
+    at.touch("dir/file");
+
+    ucmd.args(&["-s", "dir/file", "link"])
+        .succeeds()
+        .no_stderr();
+
+    assert!(at.is_symlink("link"));
+    // The stored target must use `\`, not the `/` that was passed in.
+    assert_eq!(at.resolve_link("link"), "dir\\file");
+    // And the link must resolve to the real file.
+    assert!(at.plus("link").exists());
+}
+
 #[test]
 fn test_symlink_dangling_directory() {
     let (at, mut ucmd) = at_and_ucmd!();
@@ -447,12 +468,18 @@ fn test_symlink_target_dir_from_dir() {
         .no_stderr();
 
     let file_a_link = &format!("{dir}/{filename_a}");
-    assert!(at.is_symlink(file_a_link));
-    assert_eq!(&at.resolve_link(file_a_link), file_a);
-
     let file_b_link = &format!("{dir}/{filename_b}");
+    assert!(at.is_symlink(file_a_link));
     assert!(at.is_symlink(file_b_link));
-    assert_eq!(&at.resolve_link(file_b_link), file_b);
+
+    // On Windows the stored symlink target uses `\` separators (GH #6439);
+    // on Unix it keeps the `/` it was given.
+    #[cfg(windows)]
+    let (expected_a, expected_b) = (file_a.replace('/', "\\"), file_b.replace('/', "\\"));
+    #[cfg(not(windows))]
+    let (expected_a, expected_b) = (file_a.to_string(), file_b.to_string());
+    assert_eq!(at.resolve_link(file_a_link), expected_a);
+    assert_eq!(at.resolve_link(file_b_link), expected_b);
 }
 
 #[test]
@@ -620,6 +647,13 @@ fn test_symlink_relative_path() {
         .succeeds()
         .stdout_only(format!("'{link}' -> '{}'\n", p.to_string_lossy()));
     assert!(at.is_symlink(link));
+    // On Windows the stored target uses `\` separators (GH #6439).
+    #[cfg(windows)]
+    assert_eq!(
+        at.resolve_link(link),
+        p.to_string_lossy().replace('/', "\\")
+    );
+    #[cfg(not(windows))]
     assert_eq!(at.resolve_link(link), p.to_string_lossy());
 }
 

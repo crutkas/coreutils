@@ -23,9 +23,11 @@ pub fn uumain(args: impl uucore::Args) -> UResult<()> {
 
     #[allow(clippy::unwrap_used, reason = "clap provides 'y' by default")]
     let mut buffer = args_into_buffer(matches.get_many::<OsString>("STRING").unwrap());
-    // On the platform OsStr is not &[u8], reject invalid utf8
-    // todo: accept invalid utf8 on safe output type
-    #[cfg(not(any(unix, target_os = "wasi")))]
+    // Unix and WASI store `OsStr` as raw bytes, and Windows stores it as WTF-8, so on
+    // all three `as_encoded_bytes` yields something we can stream verbatim. Anywhere
+    // else the encoding is unknown, so keep rejecting non-UTF-8 rather than emitting
+    // bytes we cannot vouch for.
+    #[cfg(not(any(unix, windows, target_os = "wasi")))]
     std::str::from_utf8(&buffer).map_err(|e| USimpleError::new(1, format!("{e}")))?;
 
     repeat_content_to_capacity(&mut buffer);

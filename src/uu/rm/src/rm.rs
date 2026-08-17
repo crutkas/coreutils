@@ -885,6 +885,21 @@ fn remove_file(path: &Path, options: &Options, progress_bar: Option<&ProgressBar
                 report_verbose_write_error(verbose_removed_file(path, options));
             }
             Err(e) => {
+                // On Windows the read-only file attribute makes `remove_file`
+                // fail with `PermissionDenied`. With `--force`, clear the
+                // attribute and retry so `rm -f` removes read-only files, as it
+                // does on Unix where the read-only bit does not block unlinking.
+                // (GH #5823)
+                #[cfg(windows)]
+                if options.force
+                    && e.kind() == io::ErrorKind::PermissionDenied
+                    && clear_readonly(path)
+                    && fs::remove_file(path).is_ok()
+                {
+                    verbose_removed_file(path, options);
+                    return false;
+                }
+
                 if e.kind() == io::ErrorKind::PermissionDenied {
                     // GNU compatibility (rm/fail-eacces.sh)
                     show_error!(
@@ -900,6 +915,25 @@ fn remove_file(path: &Path, options: &Options, progress_bar: Option<&ProgressBar
     }
 
     false
+}
+
+/// Clear the read-only file attribute on Windows so a subsequent removal can
+/// succeed. Returns true if the file is (now) writable.
+#[cfg(windows)]
+// On Windows `set_readonly(false)` clears the read-only file attribute, which
+// is exactly what we want here; the clippy lint targets the surprising Unix
+// semantics of this call, which do not apply on Windows.
+#[allow(clippy::permissions_set_readonly_false)]
+fn clear_readonly(path: &Path) -> bool {
+    let Ok(metadata) = fs::metadata(path) else {
+        return false;
+    };
+    let mut perms = metadata.permissions();
+    if !perms.readonly() {
+        return true;
+    }
+    perms.set_readonly(false);
+    fs::set_permissions(path, perms).is_ok()
 }
 
 fn prompt_dir(path: &Path, options: &Options) -> bool {

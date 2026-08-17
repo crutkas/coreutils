@@ -61,3 +61,13 @@ fn test_normal_compare_env() {
 fn test_succeeds_on_all_platforms() {
     new_ucmd!().succeeds().no_stderr();
 }
+
+#[test]
+#[cfg(windows)]
+fn test_windows_matches_username_env() {
+    if let Ok(username) = std::env::var("USERNAME")
+        && !username.is_empty()
+    {
+        new_ucmd!().succeeds().stdout_is(format!("{username}\n"));
+    }
+}

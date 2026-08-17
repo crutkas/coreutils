@@ -105,6 +105,9 @@ struct Context<'a> {
     current_dir: PathBuf,
 
     /// The path to the parent of the source directory, if any.
+    ///
+    /// `None` makes [`get_local_to_root_parent`] return descendant paths
+    /// unstripped, which is only wanted for the `cp . <dir>` special case.
     root_parent: Option<PathBuf>,
 
     /// The target path to which the directory will be copied.
@@ -124,7 +127,18 @@ impl<'a> Context<'a> {
         let target_is_file = target.is_file();
         let root_parent =
             if target.exists() && !root.as_os_str().as_encoded_bytes().ends_with(b"/.") {
-                root_path.parent().map(ToOwned::to_owned)
+                // `root_path` is always absolute, so `parent()` is `None` only when the
+                // source is a filesystem root (a Windows drive root such as `W:\`, or
+                // `/`). Leaving `root_parent` as `None` there would keep each descendant
+                // path absolute, and joining an absolute path onto the target discards
+                // the target, so every entry would be copied onto itself. Fall back to
+                // the root itself so the leading root/prefix is stripped instead.
+                // (GH #5166)
+                Some(
+                    root_path
+                        .parent()
+                        .map_or_else(|| root_path.clone(), Path::to_path_buf),
+                )
             } else if root == Path::new(".") && target.is_dir() {
                 // Special case: when copying current directory (.) to an existing directory,
                 // we don't want to use the parent path as root_parent because we want to
@@ -699,4 +713,60 @@ fn build_dir(
 
     builder.create(path)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Context, get_local_to_root_parent};
+    use std::env;
+    use std::path::{Component, PathBuf};
+
+    /// The filesystem root containing the current directory: `/` on Unix, the
+    /// drive or share prefix (e.g. `C:\`) on Windows.
+    fn filesystem_root() -> PathBuf {
+        let mut root = PathBuf::new();
+        for component in env::current_dir().unwrap().components() {
+            match component {
+                Component::Prefix(_) | Component::RootDir => root.push(component.as_os_str()),
+                _ => break,
+            }
+        }
+        root
+    }
+
+    /// `Path::parent` is `None` at a filesystem root, and a `root_parent` of `None`
+    /// makes `get_local_to_root_parent` hand back the source path unchanged. That
+    /// path is absolute, so joining it onto the target discards the target and each
+    /// entry is copied onto itself. `Context::new` must therefore fall back to the
+    /// root itself. Regression test for GH #5166, which reported this as
+    /// `cp -r W:/ dest` failing with "W:\id.dat and W:\id.dat are the same file".
+    #[test]
+    fn test_root_parent_at_filesystem_root() {
+        let root = filesystem_root();
+        assert_eq!(
+            root.parent(),
+            None,
+            "expected {root:?} to have no parent component"
+        );
+
+        let target = env::temp_dir();
+        assert!(target.exists(), "{target:?} should exist");
+
+        let context = Context::new(&root, &target).unwrap();
+        let root_parent = context
+            .root_parent
+            .expect("root_parent must not be None for a filesystem root");
+
+        // With the fallback in place the root prefix is stripped, so the descendant
+        // is relative and stays inside the target once joined.
+        let descendant = root.join("some_dir");
+        let stripped = get_local_to_root_parent(&descendant, Some(&root_parent)).unwrap();
+        assert!(stripped.is_relative(), "{stripped:?} should be relative");
+        assert!(target.join(&stripped).starts_with(&target));
+
+        // Without it, the descendant stays absolute and swallows the target.
+        let unstripped = get_local_to_root_parent(&descendant, None).unwrap();
+        assert!(unstripped.is_absolute());
+        assert_eq!(target.join(&unstripped), descendant);
+    }
 }
